@@ -1,0 +1,12 @@
+secretGenerator:
+  - name: postgres-secret
+    literals:
+      - password=root
+      - username=root
+  - name: keycloak-secret
+    literals:
+      - password=root
+      - username=root
+resources:
+  - postgres.yaml
+  - keycloak.yaml

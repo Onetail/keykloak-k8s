@@ -1,0 +1,198 @@
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: postgres-sc
+parameters:
+  type: pd-standard
+provisioner: kubernetes.io/gce-pd
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+data:
+  password: cm9vdA==
+  username: cm9vdA==
+kind: Secret
+metadata:
+  name: keycloak-secret-fhg7f45c2f
+type: Opaque
+---
+apiVersion: v1
+data:
+  password: cm9vdA==
+  username: cm9vdA==
+kind: Secret
+metadata:
+  name: postgres-secret-fhg7f45c2f
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: keycloak
+  name: keycloak
+spec:
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: keycloak
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-svc
+spec:
+  ports:
+  - port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: keyclaok
+  name: keycloak
+spec:
+  podManagementPolicy: Parallel
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: keycloak
+  serviceName: keycloak-headless
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - args:
+        - start-dev
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: keycloak-secret-fhg7f45c2f
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: keycloak-secret-fhg7f45c2f
+        - name: DB_VENDOR
+          value: postgres
+        - name: DB_ADDR
+          value: postgres-svc
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_DATABASE
+          value: keycloak
+        - name: DB_SCHEMA
+          value: public
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: postgres-secret-fhg7f45c2f
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: postgres-secret-fhg7f45c2f
+        image: quay.io/keycloak/keycloak:17.0.0
+        imagePullPolicy: IfNotPresent
+        name: keycloak
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        resources: {}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      terminationGracePeriodSeconds: 60
+  updateStrategy:
+    type: RollingUpdate
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: postgres
+  name: postgres
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: postgres
+  serviceName: postgres-svc
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: postgres-secret-fhg7f45c2f
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: postgres-secret-fhg7f45c2f
+        - name: POSTGRES_DB
+          value: keycloak
+        image: postgres:12.4-alpine
+        imagePullPolicy: IfNotPresent
+        name: postgres
+        ports:
+        - containerPort: 5432
+          protocol: TCP
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgres-pvc
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      labels:
+        app: postgres
+      name: postgres-pvc
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+      storageClassName: postgres-sc
